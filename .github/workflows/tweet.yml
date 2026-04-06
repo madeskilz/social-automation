@@ -15,30 +15,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read tweet text
-        id: tweet
-        run: |
-          TEXT=$(jq -r '.text' tweets/queue.json)
-          echo "text<<EOF" >> $GITHUB_OUTPUT
-          echo "$TEXT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          echo "=============================="
-          echo "TWEET TEXT:"
-          echo "$TEXT"
-          echo "=============================="
-
       - name: Post to Twitter via Composio
         run: |
           echo "=============================="
-          echo "CALLING COMPOSIO API..."
+          echo "STEP 1: Fetch Twitter connected account UUID"
           echo "=============================="
+
+          ACCOUNTS=$(curl -s \
+            "https://backend.composio.dev/api/v1/connectedAccounts?toolType=twitter" \
+            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}")
+
+          echo "Accounts response: $ACCOUNTS"
+
+          CONNECTED_ID=$(echo "$ACCOUNTS" | jq -r '.items[0].id // empty')
+
+          if [ -z "$CONNECTED_ID" ]; then
+            echo "Could not find connected account UUID. Trying entityId fallback..."
+            USE_ENTITY=true
+          else
+            echo "Found UUID: $CONNECTED_ID"
+            USE_ENTITY=false
+          fi
+
+          echo "=============================="
+          echo "STEP 2: Post tweet"
+          echo "=============================="
+
+          TWEET_TEXT=$(jq '.text' tweets/queue.json)
+          echo "Tweet: $TWEET_TEXT"
+
+          if [ "$USE_ENTITY" = true ]; then
+            PAYLOAD="{\"entityId\": \"default\", \"input\": {\"text\": $TWEET_TEXT}}"
+          else
+            PAYLOAD="{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $TWEET_TEXT}}"
+          fi
+
+          echo "Payload: $PAYLOAD"
 
           RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
             -X POST "https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute" \
             -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
             -H "Content-Type: application/json" \
-            --data-raw "{\"connectedAccountId\": \"${{ secrets.COMPOSIO_ACCOUNT_ID }}\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
+            --data-raw "$PAYLOAD")
 
+          echo "=============================="
           echo "FULL RESPONSE:"
           echo "$RESPONSE"
           echo "=============================="
