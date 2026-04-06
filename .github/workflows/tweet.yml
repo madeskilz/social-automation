@@ -15,56 +15,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Post Tweet
-        env:
-          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
-          COMPOSIO_ACCOUNT_ID: ${{ secrets.COMPOSIO_ACCOUNT_ID }}
+      - name: Read tweet text
+        id: tweet
         run: |
-          python3 - <<'EOF'
-          import json, requests, sys, os
+          TEXT=$(jq -r '.text' tweets/queue.json)
+          echo "text<<EOF" >> $GITHUB_OUTPUT
+          echo "$TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "=============================="
+          echo "TWEET TEXT:"
+          echo "$TEXT"
+          echo "=============================="
 
-          with open('tweets/queue.json') as f:
-              data = json.load(f)
+      - name: Post to Twitter via Composio
+        run: |
+          echo "=============================="
+          echo "CALLING COMPOSIO API..."
+          echo "=============================="
 
-          tweet_text = data.get('text', '').strip()
-          status = data.get('status', '')
+          RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
+            -X POST "https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute" \
+            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            --data-raw "{\"connectedAccountId\": \"${{ secrets.COMPOSIO_ACCOUNT_ID }}\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
 
-          if not tweet_text:
-              print("No tweet text found. Skipping.")
-              sys.exit(0)
+          echo "FULL RESPONSE:"
+          echo "$RESPONSE"
+          echo "=============================="
 
-          if status == 'posted':
-              print("Already posted. Skipping.")
-              sys.exit(0)
+          HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          echo "HTTP STATUS: $HTTP_STATUS"
 
-          api_key = os.environ['COMPOSIO_API_KEY']
-          account_id = os.environ['COMPOSIO_ACCOUNT_ID']
-
-          print(f"Posting: {tweet_text[:80]}...")
-
-          resp = requests.post(
-              'https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute',
-              headers={
-                  'x-api-key': api_key,
-                  'Content-Type': 'application/json'
-              },
-              json={
-                  'connectedAccountId': account_id,
-                  'input': {'text': tweet_text}
-              }
-          )
-
-          print(f"Status: {resp.status_code}")
-          print(f"Response: {resp.text}")
-
-          if resp.status_code in (200, 201):
-              resp_data = resp.json()
-              if resp_data.get('successful') or resp_data.get('data'):
-                  print("Tweet posted successfully!")
-              else:
-                  print(f"Composio returned error: {resp_data}")
-                  sys.exit(1)
-          else:
-              print("Tweet failed.")
-              sys.exit(1)
-          EOF
+          if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
+            echo "TWEET POSTED SUCCESSFULLY!"
+          else
+            echo "TWEET FAILED — check response above"
+            exit 1
+          fi
