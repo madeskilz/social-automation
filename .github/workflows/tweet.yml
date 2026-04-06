@@ -15,43 +15,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Find correct Twitter action name
+        run: |
+          echo "=== Available Twitter actions ==="
+          curl -s \
+            "https://backend.composio.dev/api/v2/actions?appNames=twitter&limit=20" \
+            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" | jq -r '.items[].name // .items[].slug // .items[].enum // empty' 2>/dev/null || \
+          curl -s \
+            "https://backend.composio.dev/api/v2/actions?appNames=twitter&limit=20" \
+            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" | jq '.'
+
       - name: Post to Twitter via Composio
         run: |
-          echo "=== STEP 1: List connected accounts ==="
-          ACCOUNTS=$(curl -s \
-            "https://backend.composio.dev/api/v1/connectedAccounts" \
-            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}")
-          echo "ACCOUNTS: $ACCOUNTS"
-
-          # Extract UUID for Twitter account
-          CONNECTED_ID=$(echo "$ACCOUNTS" | jq -r '.items[] | select(.appName=="twitter" or .toolType=="twitter" or .appUniqueId=="twitter") | .id' | head -1)
-
-          echo "=== Twitter UUID: $CONNECTED_ID ==="
-
-          if [ -z "$CONNECTED_ID" ]; then
-            echo "Twitter UUID not found — printing all account ids for debug:"
-            echo "$ACCOUNTS" | jq -r '.items[] | "\(.id) | \(.appName) | \(.toolType)"'
-            exit 1
-          fi
-
-          echo "=== STEP 2: Post tweet ==="
+          CONNECTED_ID="5f0e4f78-65e7-4214-914f-bd38198e68d2"
           TWEET_TEXT=$(jq -r '.text' tweets/queue.json)
           echo "Tweet: $TWEET_TEXT"
 
-          RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
-            -X POST "https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute" \
-            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
+          for ACTION in "TWITTER_CREATION_OF_A_POST" "TWITTER_CREATE_POST" "TWITTER_POST_TWEET" "TWITTER_TWEETS_CREATE"; do
+            echo "=== Trying action: $ACTION ==="
+            RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
+              -X POST "https://backend.composio.dev/api/v2/actions/$ACTION/execute" \
+              -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
 
-          echo "RESPONSE: $RESPONSE"
+            echo "RESPONSE: $RESPONSE"
+            HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
 
-          HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
-          echo "HTTP STATUS: $HTTP_STATUS"
+            if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
+              echo "SUCCESS with action: $ACTION"
+              exit 0
+            fi
 
-          if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
-            echo "TWEET POSTED SUCCESSFULLY!"
-          else
-            echo "TWEET FAILED"
-            exit 1
-          fi
+            if ! echo "$RESPONSE" | grep -q "not found"; then
+              echo "Action $ACTION exists but had a different error — stopping here"
+              exit 1
+            fi
+          done
+
+          echo "No working action found"
+          exit 1
