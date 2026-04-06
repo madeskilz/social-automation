@@ -15,53 +15,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Post to Twitter via Composio
+      - name: Post to Twitter via Composio v3
         run: |
-          echo "=============================="
-          echo "STEP 1: Fetch Twitter connected account UUID"
-          echo "=============================="
-
-          ACCOUNTS=$(curl -s \
-            "https://backend.composio.dev/api/v1/connectedAccounts?toolType=twitter" \
-            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}")
-
-          echo "Accounts response: $ACCOUNTS"
-
-          CONNECTED_ID=$(echo "$ACCOUNTS" | jq -r '.items[0].id // empty')
-
-          if [ -z "$CONNECTED_ID" ]; then
-            echo "Could not find connected account UUID. Trying entityId fallback..."
-            USE_ENTITY=true
-          else
-            echo "Found UUID: $CONNECTED_ID"
-            USE_ENTITY=false
-          fi
+          TWEET_TEXT=$(jq -r '.text' tweets/queue.json)
 
           echo "=============================="
-          echo "STEP 2: Post tweet"
+          echo "TWEET: $TWEET_TEXT"
           echo "=============================="
-
-          TWEET_TEXT=$(jq '.text' tweets/queue.json)
-          echo "Tweet: $TWEET_TEXT"
-
-          if [ "$USE_ENTITY" = true ]; then
-            PAYLOAD="{\"entityId\": \"default\", \"input\": {\"text\": $TWEET_TEXT}}"
-          else
-            PAYLOAD="{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $TWEET_TEXT}}"
-          fi
-
-          echo "Payload: $PAYLOAD"
 
           RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
-            -X POST "https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute" \
+            -X POST "https://backend.composio.dev/api/v3/tools/execute" \
             -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
             -H "Content-Type: application/json" \
-            --data-raw "$PAYLOAD")
+            -d "{
+              \"slug\": \"TWITTER_CREATE_POST\",
+              \"entityId\": \"default\",
+              \"arguments\": {
+                \"text\": $(jq '.text' tweets/queue.json)
+              }
+            }")
 
-          echo "=============================="
-          echo "FULL RESPONSE:"
-          echo "$RESPONSE"
-          echo "=============================="
+          echo "RESPONSE: $RESPONSE"
 
           HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
           echo "HTTP STATUS: $HTTP_STATUS"
@@ -69,6 +43,6 @@ jobs:
           if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
             echo "TWEET POSTED SUCCESSFULLY!"
           else
-            echo "TWEET FAILED — check response above"
+            echo "TWEET FAILED"
             exit 1
           fi
