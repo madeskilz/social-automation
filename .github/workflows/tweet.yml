@@ -15,25 +15,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Post to Twitter via Composio v3
+      - name: Post to Twitter via Composio
         run: |
-          TWEET_TEXT=$(jq -r '.text' tweets/queue.json)
+          echo "=== STEP 1: List connected accounts ==="
+          ACCOUNTS=$(curl -s \
+            "https://backend.composio.dev/api/v1/connectedAccounts" \
+            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}")
+          echo "ACCOUNTS: $ACCOUNTS"
 
-          echo "=============================="
-          echo "TWEET: $TWEET_TEXT"
-          echo "=============================="
+          # Extract UUID for Twitter account
+          CONNECTED_ID=$(echo "$ACCOUNTS" | jq -r '.items[] | select(.appName=="twitter" or .toolType=="twitter" or .appUniqueId=="twitter") | .id' | head -1)
+
+          echo "=== Twitter UUID: $CONNECTED_ID ==="
+
+          if [ -z "$CONNECTED_ID" ]; then
+            echo "Twitter UUID not found — printing all account ids for debug:"
+            echo "$ACCOUNTS" | jq -r '.items[] | "\(.id) | \(.appName) | \(.toolType)"'
+            exit 1
+          fi
+
+          echo "=== STEP 2: Post tweet ==="
+          TWEET_TEXT=$(jq -r '.text' tweets/queue.json)
+          echo "Tweet: $TWEET_TEXT"
 
           RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
-            -X POST "https://backend.composio.dev/api/v3/tools/execute" \
+            -X POST "https://backend.composio.dev/api/v2/actions/TWITTER_CREATE_POST/execute" \
             -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"slug\": \"TWITTER_CREATE_POST\",
-              \"entityId\": \"default\",
-              \"arguments\": {
-                \"text\": $(jq '.text' tweets/queue.json)
-              }
-            }")
+            -d "{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
 
           echo "RESPONSE: $RESPONSE"
 
