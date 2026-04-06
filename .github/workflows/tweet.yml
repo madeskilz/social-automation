@@ -1,4 +1,4 @@
-name: Post Tweet via Composio
+name: Post Tweet — Direct Twitter API
 
 on:
   push:
@@ -15,43 +15,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find correct Twitter action name
+      - name: Install tweepy
+        run: pip install tweepy --quiet
+
+      - name: Post Tweet
+        env:
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
         run: |
-          echo "=== Available Twitter actions ==="
-          curl -s \
-            "https://backend.composio.dev/api/v2/actions?appNames=twitter&limit=20" \
-            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" | jq -r '.items[].name // .items[].slug // .items[].enum // empty' 2>/dev/null || \
-          curl -s \
-            "https://backend.composio.dev/api/v2/actions?appNames=twitter&limit=20" \
-            -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" | jq '.'
+          python3 - <<'EOF'
+          import tweepy, json, os, sys
 
-      - name: Post to Twitter via Composio
-        run: |
-          CONNECTED_ID="5f0e4f78-65e7-4214-914f-bd38198e68d2"
-          TWEET_TEXT=$(jq -r '.text' tweets/queue.json)
-          echo "Tweet: $TWEET_TEXT"
+          with open('tweets/queue.json') as f:
+              data = json.load(f)
 
-          for ACTION in "TWITTER_CREATION_OF_A_POST" "TWITTER_CREATE_POST" "TWITTER_POST_TWEET" "TWITTER_TWEETS_CREATE"; do
-            echo "=== Trying action: $ACTION ==="
-            RESPONSE=$(curl -s -w "\n---HTTP_STATUS:%{http_code}" \
-              -X POST "https://backend.composio.dev/api/v2/actions/$ACTION/execute" \
-              -H "x-api-key: ${{ secrets.COMPOSIO_API_KEY }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"connectedAccountId\": \"$CONNECTED_ID\", \"input\": {\"text\": $(jq '.text' tweets/queue.json)}}")
+          tweet_text = data.get('text', '').strip()
 
-            echo "RESPONSE: $RESPONSE"
-            HTTP_STATUS=$(echo "$RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+          if not tweet_text:
+              print("No tweet text. Skipping.")
+              sys.exit(0)
 
-            if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]]; then
-              echo "SUCCESS with action: $ACTION"
-              exit 0
-            fi
+          if data.get('status') == 'posted':
+              print("Already posted. Skipping.")
+              sys.exit(0)
 
-            if ! echo "$RESPONSE" | grep -q "not found"; then
-              echo "Action $ACTION exists but had a different error — stopping here"
-              exit 1
-            fi
-          done
+          print(f"Posting: {tweet_text[:80]}...")
 
-          echo "No working action found"
-          exit 1
+          client = tweepy.Client(
+              consumer_key=os.environ['TWITTER_API_KEY'],
+              consumer_secret=os.environ['TWITTER_API_SECRET'],
+              access_token=os.environ['TWITTER_ACCESS_TOKEN'],
+              access_token_secret=os.environ['TWITTER_ACCESS_TOKEN_SECRET']
+          )
+
+          response = client.create_tweet(text=tweet_text)
+          print(f"SUCCESS! Tweet ID: {response.data['id']}")
+          EOF
