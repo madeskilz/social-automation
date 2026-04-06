@@ -1,0 +1,56 @@
+name: Post Tweet via Composio
+
+on:
+  push:
+    paths:
+      - 'tweets/queue.json'
+
+jobs:
+  post-tweet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post Tweet
+        run: |
+          python3 - <<'EOF'
+          import json, requests, sys
+
+          with open('tweets/queue.json') as f:
+              data = json.load(f)
+
+          tweet_text = data.get('text', '').strip()
+          status = data.get('status', '')
+
+          if not tweet_text:
+              print("No tweet text found. Skipping.")
+              sys.exit(0)
+
+          if status == 'posted':
+              print("Tweet already posted. Skipping.")
+              sys.exit(0)
+
+          print(f"Posting tweet: {tweet_text[:80]}...")
+
+          resp = requests.post(
+              'https://backend.composio.dev/api/v1/actions/TWITTER_CREATION_OF_A_POST/execute',
+              headers={
+                  'x-api-key': 'ak_haZOpKyOMjANCL8CpR_A',
+                  'Content-Type': 'application/json'
+              },
+              json={
+                  'connectedAccountId': 'ca_8H2oMpoDQhfR',
+                  'input': {'text': tweet_text}
+              }
+          )
+
+          print(f"Status: {resp.status_code}")
+          print(f"Response: {resp.text}")
+
+          if resp.status_code in (200, 201):
+              print("Tweet posted successfully!")
+          else:
+              print("Tweet failed.")
+              sys.exit(1)
+          EOF
