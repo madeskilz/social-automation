@@ -13,9 +13,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Post Tweet
+        env:
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          COMPOSIO_ACCOUNT_ID: ${{ secrets.COMPOSIO_ACCOUNT_ID }}
         run: |
           python3 - <<'EOF'
-          import json, requests, sys
+          import json, requests, sys, os
 
           with open('tweets/queue.json') as f:
               data = json.load(f)
@@ -28,19 +31,22 @@ jobs:
               sys.exit(0)
 
           if status == 'posted':
-              print("Tweet already posted. Skipping.")
+              print("Already posted. Skipping.")
               sys.exit(0)
 
-          print(f"Posting tweet: {tweet_text[:80]}...")
+          api_key = os.environ['COMPOSIO_API_KEY']
+          account_id = os.environ['COMPOSIO_ACCOUNT_ID']
+
+          print(f"Posting: {tweet_text[:80]}...")
 
           resp = requests.post(
               'https://backend.composio.dev/api/v1/actions/TWITTER_CREATION_OF_A_POST/execute',
               headers={
-                  'x-api-key': 'ak_haZOpKyOMjANCL8CpR_A',
+                  'x-api-key': api_key,
                   'Content-Type': 'application/json'
               },
               json={
-                  'connectedAccountId': 'ca_8H2oMpoDQhfR',
+                  'connectedAccountId': account_id,
                   'input': {'text': tweet_text}
               }
           )
